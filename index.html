@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>GitHubWebhookProxy</title>
+    <meta name="description" content="A proxy to filter star spam from GitHub Webhooks">
+</head>
+<body>
+<h1>Github Webhook Proxy</h1>
+<p>A proxy to filter out star spam. Paste your Webhook URL below and use the resulting URL as webhook in GitHub. Only application/json is supported.</p>
+<p>After a user stars a repo, they are blacklisted for 15 minutes. In this time subsequent stars will be dropped.</p>
+<form>
+    <label for="webhook">Webhook URL:</label>
+    <br>
+    <input type="text" id="webhook" name="webhook">
+    <br>
+    <p id="output">URL: </p>
+</form>
+<button id="btn" onclick="toClip()">Copy</button>
+    <br>
+    <br>
+    <h2>Privacy</h2>
+    <p>No data is persisted. Repo IDs and the usernames of stargazers are stored in memory for 15 minutes to block subsequent requests.
+        Afterwards, they are discarded, additionally they are not further processed or logged.
+        The webhook url you pass as query parameter is only used to do the request to it and not further processed or saved.</p>
+    <p>This program is <a href="https://github.com/Vendicated/ghwp">open source</a></p>
+</body>
+
+<script>
+    var url
+    var output = document.getElementById("output")
+    document.getElementById("webhook").addEventListener("input", e => {
+        var value = e.target.value
+        if (value) {
+            if (value.includes("discord") && !value.endsWith("/github")) value += "/github"
+            url = window.location.href.replace(/\/+$/, "") + "/webhook?url=" + encodeURIComponent(value)
+            output.innerText = "URL: " + url
+        }
+    })
+
+    function toClip() {
+        if (url)
+            navigator.clipboard.writeText(url)
+    }
+</script>
+</html>
