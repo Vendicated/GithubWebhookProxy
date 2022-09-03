@@ -30,14 +30,25 @@ func mainPage(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "index.html")
 }
 
+var verifiedIpsCache = make(map[string]bool)
+
 // Maybe there is a better way to do this? not sure
 func verifyIp(ip string) bool {
+	if verifiedIpsCache[ip] {
+		return true
+	}
+
 	res, err := http.Get("https://ipwhois.app/csv/" + ip + "?objects=isp")
 	if err != nil {
 		return false
 	}
 	b, err := io.ReadAll(res.Body)
-	return err == nil && string(b) == `"GitHub, Inc."`
+
+	isValid := err == nil && string(b) == `"GitHub, Inc."`
+	if isValid {
+		verifiedIpsCache[ip] = true
+	}
+	return isValid
 }
 
 func webhook(w http.ResponseWriter, r *http.Request) {
