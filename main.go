@@ -6,10 +6,28 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
 )
+
+var webhookIpNets []*net.IPNet
+
+func init() {
+	// https://api.github.com/meta
+	for _, cidr := range []string{
+		"192.30.252.0/22",
+		"185.199.108.0/22",
+		"140.82.112.0/20",
+		"143.55.64.0/20",
+		"2a0a:a440::/29",
+		"2606:50c0::/32",
+	} {
+		_, ipNet, _ := net.ParseCIDR(cidr)
+		webhookIpNets = append(webhookIpNets, ipNet)
+	}
+}
 
 type Payload struct {
 	Action     string     `json:"action"`
@@ -30,7 +48,27 @@ func mainPage(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "index.html")
 }
 
+func verifyIp(ipString string) bool {
+	ip := net.ParseIP(ipString)
+	if ip == nil {
+		return false
+	}
+
+	for _, network := range webhookIpNets {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	
+	return false
+}
+
 func webhook(w http.ResponseWriter, r *http.Request) {
+	if !verifyIp(r.Header.Get("X-Forwarded-For")) {
+		w.WriteHeader(403)
+		return
+	}
+
 	url := r.URL.Query().Get("url")
 	if url == "" {
 		w.WriteHeader(400)
