@@ -23,5 +23,5 @@ go build
 
 This outputs a binary `ghwp` (or `ghwp.exe` on Windows) that when run will start the server on port 1337
 
-You should then use a web server like Caddy (recommended! [Example Caddyfile](/Caddyfile)), NGINX, or Apache to reverse proxy it.
+You should then use a web server like Caddy (recommended! [Example Caddyfile that runs behind Cloudflare proxy](/Caddyfile)), NGINX, or Apache to reverse proxy it.
 Make sure that the X-Forwarded-For header is set to the requester's ip and has not been spoofed with, as it is used to verify that webhook post requests are genuine requests coming from GitHub
