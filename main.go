@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -35,7 +38,8 @@ type Payload struct {
 	Repository Repository `json:"repository"`
 }
 type Sender struct {
-	Login string `json:"login"`
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 type Repository struct {
@@ -59,8 +63,36 @@ func verifyIp(ipString string) bool {
 			return true
 		}
 	}
-	
+
 	return false
+}
+
+func makeUniqueAvatarUrl(avatarUrl string) string {
+	req, err := http.NewRequest("GET", avatarUrl, nil)
+	if err != nil {
+		return ""
+	}
+
+	req.Header.Set("Range", "bytes=200-250")
+	res, err := http.DefaultClient.Do(req)
+
+	if err != nil || res.StatusCode >= 300 {
+		return ""
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return ""
+	}
+
+	// Ugly but parsing URL and adding via "proper" method might alter the order of parameters
+	pre := "?"
+	if strings.Contains(avatarUrl, "?") {
+		pre = "&"
+	}
+	avatarUrl += pre + "hash=" + url.QueryEscape(base64.StdEncoding.EncodeToString(body))
+
+	return avatarUrl
 }
 
 func webhook(w http.ResponseWriter, r *http.Request) {
@@ -69,30 +101,34 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url := r.URL.Query().Get("url")
-	if url == "" {
+	webhookUrl := r.URL.Query().Get("url")
+	if webhookUrl == "" {
 		w.WriteHeader(400)
 		_, _ = fmt.Fprintln(w, "'webhook' parameter must be specified")
 		return
 	}
 
 	event := r.Header.Get("X-GitHub-Event")
+	if event == "" {
+		w.WriteHeader(400)
+		return
+	}
+
 	body := r.Body
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
+
+	var payload Payload
+	err = json.Unmarshal(data, &payload)
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
 
 	if event == "watch" {
-		data, err := io.ReadAll(r.Body)
-		if err != nil {
-			w.WriteHeader(400)
-			return
-		}
-
-		var payload Payload
-		err = json.Unmarshal(data, &payload)
-		if err != nil {
-			w.WriteHeader(400)
-			return
-		}
-
 		if payload.Action == "started" {
 			key := payload.Sender.Login + strconv.Itoa(payload.Repository.Id)
 			if starGazers[key] {
@@ -105,10 +141,19 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
-		body = io.NopCloser(bytes.NewReader(data))
 	}
 
-	post, err := http.NewRequest("POST", url, body)
+	if payload.Sender.AvatarURL != "" {
+		avatarUrl := makeUniqueAvatarUrl(payload.Sender.AvatarURL)
+		if avatarUrl != "" {
+			// Ugly but the alternative is unmarshalling to generic map which makes the rest of the code ugly (since we need to marshal it back with all fields)
+			bytes.ReplaceAll(data, []byte(payload.Sender.AvatarURL), []byte(avatarUrl))
+		}
+	}
+
+	body = io.NopCloser(bytes.NewReader(data))
+
+	post, err := http.NewRequest("POST", webhookUrl, body)
 	if err != nil {
 		w.WriteHeader(400)
 		return
