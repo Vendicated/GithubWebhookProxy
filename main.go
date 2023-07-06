@@ -147,7 +147,7 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 		avatarUrl := makeUniqueAvatarUrl(payload.Sender.AvatarURL)
 		if avatarUrl != "" {
 			// Ugly but the alternative is unmarshalling to generic map which makes the rest of the code ugly (since we need to marshal it back with all fields)
-			bytes.ReplaceAll(data, []byte(payload.Sender.AvatarURL), []byte(avatarUrl))
+			data = bytes.ReplaceAll(data, []byte(payload.Sender.AvatarURL), []byte(avatarUrl))
 		}
 	}
 
