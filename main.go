@@ -12,23 +12,62 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-var webhookIpNets []*net.IPNet
+const (
+	githubMetaUrl = "https://api.github.com/meta"
+)
 
-func init() {
-	// https://api.github.com/meta
-	for _, cidr := range []string{
-		"192.30.252.0/22",
-		"185.199.108.0/22",
-		"140.82.112.0/20",
-		"143.55.64.0/20",
-		"2a0a:a440::/29",
-		"2606:50c0::/32",
-	} {
-		_, ipNet, _ := net.ParseCIDR(cidr)
-		webhookIpNets = append(webhookIpNets, ipNet)
+var webhookIpNets atomic.Pointer[[]*net.IPNet]
+
+type GithubMeta struct {
+	Hooks []string `json:"hooks"`
+}
+
+func fetchWebhookIpNets() error {
+	res, err := http.Get(githubMetaUrl)
+	if err != nil {
+		return fmt.Errorf("failed to fetch %s: %w", githubMetaUrl, err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch %s: unexpected status %s", githubMetaUrl, res.Status)
+	}
+
+	var meta GithubMeta
+	if err := json.NewDecoder(res.Body).Decode(&meta); err != nil {
+		return fmt.Errorf("failed to decode %s: %w", githubMetaUrl, err)
+	}
+
+	ipNets := make([]*net.IPNet, 0, len(meta.Hooks))
+	for _, cidr := range meta.Hooks {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			log.Printf("ignoring invalid hook cidr %q: %v", cidr, err)
+			continue
+		}
+
+		ipNets = append(ipNets, ipNet)
+	}
+
+	webhookIpNets.Store(&ipNets)
+
+	return nil
+}
+
+func refreshWebhookIpNetsLoop() {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := fetchWebhookIpNets(); err != nil {
+			log.Printf("failed to refresh github webhook ip ranges: %v", err)
+			continue
+		}
+		log.Printf("refreshed github webhook ip ranges")
 	}
 }
 
@@ -58,7 +97,12 @@ func verifyIp(ipString string) bool {
 		return false
 	}
 
-	for _, network := range webhookIpNets {
+	ipNets := webhookIpNets.Load()
+	if ipNets == nil {
+		return false
+	}
+
+	for _, network := range *ipNets {
 		if network.Contains(ip) {
 			return true
 		}
@@ -170,6 +214,12 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	if err := fetchWebhookIpNets(); err != nil {
+		log.Fatalf("failed to fetch github webhook ip ranges: %v", err)
+	}
+	log.Printf("loaded github webhook ip ranges")
+	go refreshWebhookIpNetsLoop()
+
 	http.HandleFunc("/", mainPage)
 	http.HandleFunc("/webhook", webhook)
 
